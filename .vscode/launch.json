@@ -1,0 +1,18 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "DEBUG DETECTIVE QUEST",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/detective_quest",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "environment": [],
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "preLaunchTask": "BUILD DETECTIVE QUEST"
+    }
+  ]
+}
