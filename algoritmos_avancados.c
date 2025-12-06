@@ -1,47 +1,168 @@
+#include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
-// Desafio Detective Quest
-// Tema 4 - Árvores e Tabela Hash
-// Este código inicial serve como base para o desenvolvimento das estruturas de navegação, pistas e suspeitos.
-// Use as instruções de cada região para desenvolver o sistema completo com árvore binária, árvore de busca e tabela hash.
+#include "bst/bst.h"
+#include "clue/clue.h"
+#include "globals.h"
+#include "hash/hash.h"
+#include "room/room.h"
+#include "suspect/suspect.h"
+#include "utils/utils.h"
 
-int main() {
+/* -------------------------
+   Types / "Objects"
+   -------------------------*/
+HashEntry* hash_table[HASH_SIZE];
+static SuspectCount* suspect_counts = NULL;
+static BSTNode* bst_root = NULL;
+static Room* mansion_global = NULL;
 
-    // 🌱 Nível Novato: Mapa da Mansão com Árvore Binária
-    //
-    // - Crie uma struct Sala com nome, e dois ponteiros: esquerda e direita.
-    // - Use funções como criarSala(), conectarSalas() e explorarSalas().
-    // - A árvore pode ser fixa: Hall de Entrada, Biblioteca, Cozinha, Sótão etc.
-    // - O jogador deve poder explorar indo à esquerda (e) ou à direita (d).
-    // - Finalize a exploração com uma opção de saída (s).
-    // - Exiba o nome da sala a cada movimento.
-    // - Use recursão ou laços para caminhar pela árvore.
-    // - Nenhuma inserção dinâmica é necessária neste nível.
+/* -------------------------
+   Mansion construction (example)
+   -------------------------*/
 
-    // 🔍 Nível Aventureiro: Armazenamento de Pistas com Árvore de Busca
-    //
-    // - Crie uma struct Pista com campo texto (string).
-    // - Crie uma árvore binária de busca (BST) para inserir as pistas coletadas.
-    // - Ao visitar salas específicas, adicione pistas automaticamente com inserirBST().
-    // - Implemente uma função para exibir as pistas em ordem alfabética (emOrdem()).
-    // - Utilize alocação dinâmica e comparação de strings (strcmp) para organizar.
-    // - Não precisa remover ou balancear a árvore.
-    // - Use funções para modularizar: inserirPista(), listarPistas().
-    // - A árvore de pistas deve ser exibida quando o jogador quiser revisar evidências.
+static Room* build_mansion(void) {
+  /* create Clue objects (shared pointers) */
+  Clue* c_note = clue_create("nota_enigmatica", "Sr. Oliveira");
+  Clue* c_foot = clue_create("pegada", "Sra. Pereira");
+  Clue* c_glass = clue_create("taca_quebrada", "Chef Gomes");
+  Clue* c_blood = clue_create("fio_de_sangue", "Cozinheiro Alves");
+  Clue* c_fiber = clue_create("fibra_de_tecido", "Srta. Lima");
 
-    // 🧠 Nível Mestre: Relacionamento de Pistas com Suspeitos via Hash
-    //
-    // - Crie uma struct Suspeito contendo nome e lista de pistas associadas.
-    // - Crie uma tabela hash (ex: array de ponteiros para listas encadeadas).
-    // - A chave pode ser o nome do suspeito ou derivada das pistas.
-    // - Implemente uma função inserirHash(pista, suspeito) para registrar relações.
-    // - Crie uma função para mostrar todos os suspeitos e suas respectivas pistas.
-    // - Adicione um contador para saber qual suspeito foi mais citado.
-    // - Exiba ao final o “suspeito mais provável” baseado nas pistas coletadas.
-    // - Para hashing simples, pode usar soma dos valores ASCII do nome ou primeira letra.
-    // - Em caso de colisão, use lista encadeada para tratar.
-    // - Modularize com funções como inicializarHash(), buscarSuspeito(), listarAssociacoes().
+  /* rooms */
+  Room* hall = room_create("Hall de Entrada", NULL);
+  Room* library = room_create("Biblioteca", c_note);
+  Room* study = room_create("Escritório", c_foot);
+  Room* conservatory = room_create("Conservatório", NULL);
+  Room* dining = room_create("Sala de Jantar", c_glass);
+  Room* kitchen = room_create("Cozinha", c_blood);
+  Room* pantry = room_create("Despensa", NULL);
+  Room* balcony = room_create("Varanda", c_fiber);
+  Room* garden = room_create("Jardim", NULL);
 
-    return 0;
+  /* assemble binary tree */
+  hall->left = library;
+  hall->right = dining;
+
+  library->left = study;
+  library->right = conservatory;
+
+  dining->left = kitchen;
+  dining->right = pantry;
+
+  study->left = balcony;
+  study->right = garden;
+
+  /* store global pointer for visualization */
+  mansion_global = hall;
+
+  return hall;
 }
 
+/* -------------------------
+   ASCII Tree Visualization
+   - prints rotated tree: right subtree first (top), root, left subtree (bottom)
+   - shows [V] if visited and which clue was found there (if any)
+   -------------------------*/
+static void print_tree_ascii(Room* root, int level) {
+  if (!root) return;
+
+  print_tree_ascii(root->right, level + 1);
+  for (int i = 0; i < level; ++i) printf("       ");
+  printf("%s %s", root->visited ? "[V]" : "[ ]", root->name_pt);
+  if (root->found_clue_name) {
+    printf("  -> pista: %s", root->found_clue_name);
+  }
+
+  printf("\n");
+
+  print_tree_ascii(root->left, level + 1);
+}
+
+/* -------------------------
+   Final Report
+   -------------------------*/
+
+static void show_report(void) {
+  printf("\n===== Relatório da Investigação =====\n");
+
+  printf("\nPistas coletadas (ordem alfabética):\n");
+  if (!bst_root) {
+    printf("Nenhuma pista cadastrada.\n");
+  } else {
+    bst_inorder_print(bst_root);
+  }
+
+  printf("\nAssociações (pista -> suspeito):\n");
+  hash_print_all(hash_table);
+
+  printf("\nContagem por suspeito:\n");
+  if (!suspect_counts) {
+    printf("Nenhum suspeito associado.\n");
+  } else {
+    suspect_counts_print(suspect_counts);
+    char* most = suspect_most_cited(suspect_counts);
+    if (most) {
+      printf("\nSuspeito mais citado: %s\n", most);
+    }
+  }
+
+  printf("\n=========== Mapa da Mansão ===========\n");
+  printf("Legenda: [V] visitado | [ ] não visitado\n\n");
+  print_tree_ascii(mansion_global, 0);
+
+  printf("\n=====================================\n");
+}
+
+/* -------------------------
+   Cleanup
+   -------------------------*/
+
+/* The cleanup function frees all dynamically allocated memory:
+   - BST, hash table, and suspect counts are freed directly.
+   - Clue objects are freed by traversing the mansion tree
+   (free_clues_from_mansion), ensuring each clue is freed once, rather than
+   individually.
+   - The room tree itself is then freed. */
+static void cleanup(Room* mansion) {
+  /* free BST, hash, suspect counts */
+  bst_free(bst_root);
+  hash_free_all(hash_table);
+  suspect_counts_free(&suspect_counts);
+
+  /* free clue objects via mansion tree traversal */
+  free_clues_from_mansion(mansion);
+
+  /* free room tree */
+  room_free_recursive(mansion);
+}
+
+/* -------------------------
+   main
+   -------------------------*/
+
+int main(void) {
+  /* initialize hash table */
+  for (int i = 0; i < HASH_SIZE; ++i) hash_table[i] = NULL;
+
+  /* build mansion graph and clues */
+  Room* mansion = build_mansion();
+  if (!mansion) {
+    fprintf(stderr, "Erro ao construir a mansão.\n");
+    return EXIT_FAILURE;
+  }
+
+  printf("=== Detective Quest: Mestre ===\n");
+  printf(
+      "Comandos durante a exploração: e (esquerda), d (direita), s (sair)\n");
+
+  explore_rooms(mansion, &bst_root, &suspect_counts, hash_table);
+
+  show_report();
+
+  cleanup(mansion);
+
+  return 0;
+}
